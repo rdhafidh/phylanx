@@ -15,5 +15,4 @@ def f():
     return [1, [1]]
 
 
-assert f.__src__ == \
-    "define$14$0(f$14$0, make_list$15$11(1,make_list$15$15(1)))"
+assert f() == [1, [1]]
