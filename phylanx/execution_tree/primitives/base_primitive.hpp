@@ -14,7 +14,6 @@
 #include <phylanx/ir/node_data.hpp>
 #include <phylanx/ir/ranges.hpp>
 #include <phylanx/ir/dictionary.hpp>
-#include <phylanx/util/variant.hpp>
 
 #include <hpx/include/runtime.hpp>
 #include <hpx/include/util.hpp>
@@ -151,7 +150,7 @@ namespace phylanx { namespace execution_tree
           , primitive
           , std::vector<ast::expression>
           , ir::range
-          , phylanx::util::recursive_wrapper<phylanx::ir::dictionary>
+          , phylanx::ir::dictionary
         >;
 
     struct primitive_argument_type : argument_value_type
@@ -286,6 +285,13 @@ namespace phylanx { namespace execution_tree
           : argument_value_type{val}
         {}
         primitive_argument_type(ir::range&& val)
+          : argument_value_type{std::move(val)}
+        {}
+
+        primitive_argument_type(ir::dictionary const& val)
+          : argument_value_type{val}
+        {}
+        primitive_argument_type(ir::dictionary&& val)
           : argument_value_type{std::move(val)}
         {}
 

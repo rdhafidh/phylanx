@@ -8,6 +8,7 @@
 #define PHYLANX_DICTIONARY
 
 #include <phylanx/config.hpp>
+#include <phylanx/util/variant.hpp>
 
 #include <hpx/include/serialization.hpp>
 
@@ -20,8 +21,20 @@ namespace phylanx { namespace execution_tree
 
 namespace phylanx { namespace ir
 {
-    using dictionary = std::unordered_map<phylanx::execution_tree::primitive_argument_type, phylanx::execution_tree::primitive_argument_type>;
+    using dictionary = std::unordered_map<phylanx::util::recursive_wrapper<phylanx::execution_tree::primitive_argument_type>, phylanx::util::recursive_wrapper<phylanx::execution_tree::primitive_argument_type>>;
 }}
 
+namespace std
+{
+    template<> struct hash<phylanx::util::recursive_wrapper<phylanx::execution_tree::primitive_argument_type>>
+    {
+        typedef phylanx::util::recursive_wrapper<phylanx::execution_tree::primitive_argument_type> argument_type;
+        typedef std::size_t result_type;
+        result_type operator()(argument_type const& s) const noexcept
+        {
+            return 42;
+        }
+    };
+}
 
 #endif
