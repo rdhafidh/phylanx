@@ -25,7 +25,12 @@ def Phylanx(__phylanx_arg=None, **kwargs):
 
             self.backends_map = {'PhySL': PhySL, 'OpenSCoP': OpenSCoP}
             self.backend = self.get_backend(kwargs.get('target'))
-            kwargs['fglobals'] = f.__globals__
+
+            # Obtain global environment if the object is a function.
+            if inspect.isclass(f):
+                kwargs['fglobals'] = None
+            else:
+                kwargs['fglobals'] = f.__globals__
 
             python_src = self.get_python_src(f)
             python_ast = self.get_python_ast(python_src, f)
@@ -35,6 +40,7 @@ def Phylanx(__phylanx_arg=None, **kwargs):
 
         def get_backend(self, target):
             """Set the target backend. By default it is set to PhySL."""
+
             if target:
                 if target not in self.backends_map:
                     raise NotImplementedError("Unknown target: %s." % target)
@@ -44,6 +50,8 @@ def Phylanx(__phylanx_arg=None, **kwargs):
 
         def get_python_src(self, f):
             """Gets the function's source and removes the decorator line."""
+
+            # get the source and remove the decorator line.
             src = inspect.getsource(f)
             src = re.sub(r'^\s*@\w+.*\n', '', src)
 

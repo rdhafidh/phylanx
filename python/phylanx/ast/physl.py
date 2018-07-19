@@ -30,11 +30,15 @@ def primitive_name(method_name):
     if primitive_name == None: primitive_name = method_name
     return primitive_name
 
-def physl_fmt(src, tag=4):
-    """Pretty print PhySL source code"""
+def print_physl_src(src, with_symbol_info=False, tag=4):
+    """Pretty print PhySL source code."""
 
     # Remove line number info
     src = re.sub(r'\$\d+', '', src)
+
+    if with_symbol_info:
+        print(src)
+        return
 
     # The regex below matches one of the following three
     # things in order of priority:
@@ -64,108 +68,14 @@ def physl_fmt(src, tag=4):
     print("", sep="")
 
 
-def dump_info(a, depth=0):
-    "Print detailed information about an AST"
+def get_symbol_info(symbol, name):
+    """Adds symbol info (line and column number) to the symbol."""
 
-    nm = a.__class__.__name__
-    print("  " * depth, end="")
-    iter_children = True
-    if nm == "Num":
-        if type(a.n) == int:
-            print("%s=%d" % (nm, a.n))
-        else:
-            print("%s=%f" % (nm, a.n))
-    elif nm == "Global":
-        print("Global:", dir(a))
-    elif nm == "Str":
-        print("%s='%s'" % (nm, a.s))
-    elif nm == "Name":
-        print("%s='%s'" % (nm, a.id))
-    elif nm == "arg":
-        print("%s='%s'" % (nm, a.arg))
-    elif nm == "Slice":
-        print("Slice:")
-        print("  " * depth, end="")
-        print("  Upper:")
-        if a.upper is not None:
-            dump_info(a.upper, depth + 4)
-        print("  " * depth, end="")
-        print("  Lower:")
-        if a.lower is not None:
-            dump_info(a.lower, depth + 4)
-        print("  " * depth, end="")
-        print("  Step:")
-        if a.step is not None:
-            dump_info(a.step, depth + 4)
-    elif nm == "If":
-        iter_children = False
-        print(nm)
-        dump_info(a.test, depth)
-        for n in a.body:
-            dump_info(n, depth + 1)
-        if len(a.orelse) > 0:
-            print("  " * depth, end="")
-            print("Else")
-            for n in a.orelse:
-                dump_info(n, depth + 1)
-    else:
-        print(nm)
-    for (f, v) in ast.iter_fields(a):
-        if type(f) == str and type(v) == str:
-            print("%s:attr[%s]=%s" % ("  " * (depth + 1), f, v))
-    if iter_children:
-        for n in ast.iter_child_nodes(a):
-            dump_info(n, depth + 1)
-
-
-def print_physl(physl_src):
-    print(re.sub(r'\$\d+', '', physl_src))
-
-
-def get_symbol_info(a, name):
-    return '%s$%d$%d' % (name, a.lineno, a.col_offset)
-
-
-def get_node(node, **kwargs):
-    if node is None:
-        return None
-    args = [arg for arg in ast.iter_child_nodes(node)]
-    params = {"name": None, "num": None}
-    for k in kwargs:
-        if k not in params:
-            raise Exception("Invalid argument '%s'" % k)
-        else:
-            params[k] = kwargs[k]
-    name = params["name"]
-    num = params["num"]
-    if name is not None:
-        for i in range(len(args)):
-            a = args[i]
-            nm = a.__class__.__name__
-            if nm == name:
-                if num is None or num == i:
-                    return a
-    elif num is not None:
-        if num < len(args):
-            return args[num]
-
-    # if we can't find what we're looking for...
-    return None
+    return '%s$%d$%d' % (name, symbol.lineno, symbol.col_offset)
 
 
 def remove_line(a):
     return re.sub(r'\$.*', '', a)
-
-
-def convert_to_phylanx_type(v):
-    t = type(v)
-    try:
-        import numpy
-        if t == numpy.ndarray:
-            return phylanx.execution_tree.var(v)
-    except NotImplementedError:
-        pass
-    return v
 
 
 class PhySL:
@@ -178,9 +88,13 @@ class PhySL:
         self.wrapped_function = func
         self.fglobals = kwargs['fglobals']
 
+
         # Add arguments of the function to the list of discovered variables.
-        for arg in tree.body[0].args.args:
-            self.defs.add(arg.arg)
+        if inspect.isfunction(tree.body[0]):
+            for arg in tree.body[0].args.args:
+                self.defs.add(arg.arg)
+        else:
+            PhySL.defined_classes = {}
 
 
         #self.ir = map(self.apply_rule, tree.body)
@@ -188,7 +102,7 @@ class PhySL:
         self.__src__ = self.generate_physl(self.ir)
 
         if kwargs.get("debug"):
-            physl_fmt(self.__src__)
+            print_physl_src(self.__src__)
             print(end="", flush="")
 
         if "compiler_state" in kwargs:
@@ -212,6 +126,7 @@ class PhySL:
             return ir
 
     def apply_rule(self, node):
+        """Calls the corresponding rule, based on the name of the node."""
         if node is not None:
             node_name = node.__class__.__name__
             return eval('self._%s' % node_name)(node)
@@ -227,20 +142,19 @@ class PhySL:
         return ['block', block]
 
     def call(self, args):
-        nargs = tuple(convert_to_phylanx_type(a) for a in args)
         fname = self.wrapped_function.__name__
-        return phylanx.execution_tree.eval(fname, PhySL.compiler_state, *nargs)
+        return phylanx.execution_tree.eval(fname, PhySL.compiler_state, *args)
 
 # #############################################################################
 # Transducer rules
 
     def _Add(self, node):
-        """Leaf node returning raw string of the 'add operation'."""
+        """Leaf node, returning raw string of the `add` operation."""
 
         return '__add'
 
     def _And(self, node):
-        """Leaf node returning raw string of the 'and operation'."""
+        """Leaf node, returning raw string of the `and` operation."""
 
         return '__and'
 
@@ -254,7 +168,7 @@ class PhySL:
 
         TODO: 
             add support for `annotation` which is ignored at this time. Maybe
-            we can use this to track type information!
+            we can use this to let user provide type information!?!
         """
 
         return node.arg
@@ -274,8 +188,7 @@ class PhySL:
         """
         if node.vararg or node.kwarg:
             raise (Exception("Phylanx does not support *args and **kwargs"))
-        args = list(map(self.apply_rule, node.args))
-        args = ', '.join(map(str, args))
+        args = tuple(map(self.apply_rule, node.args))
         return args
 
     def _Assign(self, node):
@@ -296,6 +209,7 @@ class PhySL:
                 "Phylanx does not support multi-target assignments.")
 
         symbol = self.apply_rule(node.targets[0])
+        # if lhs is not indexed.
         if isinstance(symbol, str):
             symbol_name = re.sub(r'\$\d+', '', symbol)
             if symbol_name in self.defs:
@@ -308,14 +222,12 @@ class PhySL:
                 # dictionary with the symbol names as keys and list of
                 # symbol_infos to keep track of the symbol.
                 self.defs.add(symbol_name)
+        # lhs is a subscript.
         else:
-            op = get_symbol_info(node.targets[0], "set")
-
-
+            op = get_symbol_info(node.targets[0], "store")
 
         target = self.apply_rule(node.targets[0])
         value = self.apply_rule(node.value)
-
         return [op, (target, value)]
 
     def _Attribute(self, node):
@@ -373,6 +285,28 @@ class PhySL:
         args = tuple(self.apply_rule(arg) for arg in node.args)
         return [symbol, args]
 
+    #def _ClassDef(self, node):
+    #    """class ClassDef(name, bases, keywords, starargs, kwargs, body,
+    #                      decorator_list)
+
+    #    `name` is a raw string for the class name.
+    #    `bases` is a list of nodes for explicitly specified base classes.
+    #    `keywords` is a list of keyword nodes, principally for `metaclass`.
+    #        Other keywords will be passed to the metaclass, as per PEP-3115.
+    #    `starargs` removed in python 3.5.
+    #    `kwargs`   removed in Python 3.5.
+    #    `body` is a list of nodes representing the code within the class
+    #        definition.
+    #    `decorator_list` is the list of decorators to be applied, stored
+    #        outermost first (i.e. the first in the list will be applied last).
+    #    """
+    #    PhySL.defined_classes[node.name] = {}
+    #    if node.bases:
+    #        raise NotImplementedError("Phylanx does not support inheritance.")
+    #    class_body = list(self.apply_rule(m) for m in node.body)
+
+    #    return class_body
+
     def _Compare(self, node):
         """class Compare(left, ops, comparators)
         
@@ -391,7 +325,7 @@ class PhySL:
         else:
             # if we're dealing with more than one comparison, we canonicalize the
             # comparisons in to the form of chained logical ands. e.g., a < b < c
-            # becomes: ([and_operation ((less b, c), (less a, b))])
+            # becomes: ([__and ((__lt b, c), (__lt a, b))])
             # TODO: Make sure to respect Python operator precedence.
             comparison = []
             for i in range(len(node.ops)):
@@ -414,17 +348,17 @@ class PhySL:
             return comparison
 
     def _Div(self, node):
-        """Leaf node returning raw string of the 'division operation'."""
+        """Leaf node, returning raw string of the 'division' operation."""
         return '__div'
 
     def _Eq(self, node):
-        """Leaf node returning raw string of the 'equality operation'."""
+        """Leaf node, returning raw string of the 'equality' operation."""
         return '__eq'
 
     def _Expr(self, node):
         """class Expr(value)
         
-        `value` holds one of the other rules.
+        `value` holds one of the other nodes (rules).
         """
 
         return self.apply_rule(node.value)
@@ -444,12 +378,12 @@ class PhySL:
         """class For(target, iter, body, orelse)
 
         A for loop.
-        `target` holds the variable(s) the loop assigns to, as a single Name, Tuple or
-        List node.
+        `target` holds the variable(s) the loop assigns to, as a single Name,
+            Tuple or List node.
         `iter` holds the item to be looped over, again as a single node.
         `body` contain lists of nodes to execute.
-        `orelse` same as `body`, however, those in orelse are executed if the loop
-        finishes normally, rather than via a break statement.
+        `orelse` same as `body`, however, those in orelse are executed if the
+            loop finishes normally, rather than via a break statement.
         """
 
         # this lookup table helps us to choose the right mapping function based on the 
@@ -500,11 +434,13 @@ class PhySL:
             return [op, (symbol, body)]
 
     def _Gt(self, node):
-        """Leaf node returning raw string of the 'greater than operation'."""
+        """Leaf node, returning raw string of the 'greater than' operation."""
+
         return '__gt'
 
     def _GtE(self, node):
-        """Leaf node returning raw string of the 'greater than or equal operation'."""
+        """Leaf node, returning raw string of the 'greater than or equal' operation."""
+
         return '__ge'
 
     def _If(self, node):
@@ -522,7 +458,7 @@ class PhySL:
         return [symbol, (test, body, orelse)]
 
     def _In(self, node):
-        raise Exception("`In` operator is not defined in Phylanx")
+        raise Exception("`In` operator is not defined in Phylanx.")
 
     def _Index(self, node):
         """class Index(value)
@@ -532,10 +468,10 @@ class PhySL:
         return list(map(str, self.apply_rule(node.value)))
 
     def _Is(self, node):
-        raise Exception("`Is` operator is not defined in Phylanx")
+        raise Exception("`Is` operator is not defined in Phylanx.")
 
     def _IsNot(self, node):
-        raise Exception("`IsNot` operator is not defined in Phylanx")
+        raise Exception("`IsNot` operator is not defined in Phylanx.")
 
     def _Lambda(self, node):
         """class Lambda(args, body)
@@ -552,15 +488,17 @@ class PhySL:
         """class List(elts, ctx)"""
 
         op = get_symbol_info(node, 'make_list')
-        content = tuple(map(self.apply_rule, node.elts))
-        return [op, (*content, )]
+        elements = tuple(map(self.apply_rule, node.elts))
+        return [op, (*elements, )]
 
     def _Lt(self, node):
-        """Leaf node returning raw string of the 'less than operation'."""
+        """Leaf node, returning raw string of the 'less than' operation."""
+
         return '__lt'
 
     def _LtE(self, node):
-        """Leaf node returning raw string of the 'less than or equal operation'."""
+        """Leaf node, returning raw string of the 'less than or equal' operation."""
+
         return '__le'
 
     def _Module(self, node):
@@ -570,7 +508,7 @@ class PhySL:
         return module
 
     def _Mult(self, node):
-        """Leaf node returning raw string of the 'multiplication operation'."""
+        """Leaf node, returning raw string of the 'multiplication' operation."""
 
         return '__mul'
 
@@ -591,27 +529,31 @@ class PhySL:
         return name_constants[node.value] + get_symbol_info(node, '')
 
     def _Not(self, node):
-        """Leaf node returning raw string of the 'not operation'."""
+        """Leaf node, returning raw string of the 'not' operation."""
+
         return '__not'
 
     def _NotEq(self, node):
-        """Leaf node returning raw string of the 'not equal operation'."""
+        """Leaf node, returning raw string of the 'not equal' operation."""
+
         return '__ne'
 
     def _NotIn(self, node):
-        raise Exception("`NotIn` operator is not defined in Phylanx")
+        raise Exception("`NotIn` operator is not defined in Phylanx.")
 
     def _Num(self, node):
-        """class Name(n)"""
+        """class Num(n)"""
 
         return str(node.n)
 
     def _Or(self, node):
-        """Leaf node returning raw string of the 'or operation'."""
+        """Leaf node, returning raw string of the 'or' operation."""
+
         return '__or'
 
     def _Pow(self, node):
-        """Leaf node returning raw string of the 'power operation'."""
+        """Leaf node, returning raw string of the 'power' operation."""
+
         return 'power'
 
     def _Return(self, node):
@@ -649,16 +591,21 @@ class PhySL:
         return '"' + node.s + '"'
 
     def _Sub(self, node):
+        """Leaf node, returning raw string of the 'subtraction' operation."""
+
         return '__sub'
 
     def _Subscript(self, node):
         """class Subscript(value, slice, ctx)"""
-
-        op = '%s' % get_symbol_info(node, 'slice')
         value = self.apply_rule(node.value)
-        slice_ = self.apply_rule(node.slice)
+        if isinstance(node.ctx, ast.Load):
+            op = '%s' % get_symbol_info(node, 'slice')
+            slice_ = self.apply_rule(node.slice)
+            return [op, (value, [slice_])]
+        if isinstance(node.ctx, ast.Store):
+            slice_ = self.apply_rule(node.slice)
+            return [(value, [slice_])]
 
-        return [op, (value, [slice_])]
 
     def _Tuple(self, node):
         """class Tuple(elts, ctx)"""
@@ -678,13 +625,16 @@ class PhySL:
     def _UnaryOp(self, node):
         """class UnaryOp(op, operand)"""
 
-        op = self.apply_rule(node.op)
         operand = self.apply_rule(node.operand)
+        if isinstance(node.op, ast.UAdd):
+            return [(operand,)]
 
+        op = self.apply_rule(node.op)
         return [op, (operand,)]
 
     def _USub(self, node):
-        """Leaf node returning raw string of the 'negative operation'."""
+        """Leaf node, returning raw string of the 'negative' operation."""
+
         return '__minus'
 
     def _While(self, node):
