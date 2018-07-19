@@ -597,11 +597,29 @@ class PhySL:
 
     def _Subscript(self, node):
         """class Subscript(value, slice, ctx)"""
-        value = self.apply_rule(node.value)
+
+        if isinstance(node.value, ast.Subscript):
+            value = self._HigherSubscript(node.value)
+        else:
+            value = self.apply_rule(node.value)
         if isinstance(node.ctx, ast.Load):
             op = '%s' % get_symbol_info(node, 'slice')
             slice_ = self.apply_rule(node.slice)
             return [op, (value, [slice_])]
+        if isinstance(node.ctx, ast.Store):
+            slice_ = self.apply_rule(node.slice)
+            return [(value, [slice_])]
+
+    def _HigherSubscript(self, node):
+
+        if isinstance(node.value, ast.Subscript):
+            value = self._HigherSubscript(node.value)
+        else:
+            value = self.apply_rule(node.value)
+        if isinstance(node.ctx, ast.Load):
+            slice_ = self.apply_rule(node.slice)
+            return [value, [slice_]]
+
         if isinstance(node.ctx, ast.Store):
             slice_ = self.apply_rule(node.slice)
             return [(value, [slice_])]
