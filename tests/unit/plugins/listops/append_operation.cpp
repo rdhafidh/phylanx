@@ -13,7 +13,8 @@
 #include <string>
 
 ///////////////////////////////////////////////////////////////////////////////
-phylanx::execution_tree::primitive_argument_type compile_and_run(std::string const& codestr)
+phylanx::execution_tree::primitive_argument_type compile_and_run(
+    std::string const& codestr)
 {
     phylanx::execution_tree::compiler::function_list snippets;
     phylanx::execution_tree::compiler::environment env =
